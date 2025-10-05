@@ -44,9 +44,10 @@ class UnionFind:
         for item in items:
             self.find(item)
 
-    def groups(self) -> List[List[str]]:
-        """Return the current partitioning as a list of groups."""
+    def groups(self) -> Dict[str, List[str]]:
+        """Return the current partitioning as a mapping of roots to members."""
         buckets: Dict[str, List[str]] = defaultdict(list)
         for item in self._parent:
-            buckets[self.find(item)].append(item)
-        return list(buckets.values())
+            root = self.find(item)
+            buckets[root].append(item)
+        return {root: members for root, members in buckets.items()}

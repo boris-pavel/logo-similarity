@@ -1,10 +1,10 @@
-﻿"""Data models shared across the logo similarity pipeline."""
+"""Data models shared across the logo similarity pipeline."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Mapping, Sequence
+from typing import Dict, List, Mapping
 
 
 @dataclass(slots=True)
@@ -19,12 +19,15 @@ class LogoAsset:
 
 @dataclass(slots=True)
 class LogoFeatures:
-    """Aggregated features for similarity comparisons."""
+    """Aggregated features computed for a website's preferred logo."""
 
     website: str
-    perceptual: str | None = None
-    color: Sequence[float] | None = None
-    shape_descriptors: Sequence[float] | None = None
+    original_path: Path | None = None
+    normalized_path: Path | None = None
+    preview_path: Path | None = None
+    perceptual: Dict[str, str] = field(default_factory=dict)
+    hsv_histogram: List[float] = field(default_factory=list)
+    dominant_hues: List[int] = field(default_factory=list)
 
 
 @dataclass(slots=True)
