@@ -1,0 +1,12 @@
+﻿requests
+beautifulsoup4
+lxml
+pillow
+imagehash
+opencv-python-headless
+numpy
+pandas
+pyarrow
+playwright
+tqdm
+tenacity
