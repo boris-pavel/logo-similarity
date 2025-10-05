@@ -1,10 +1,12 @@
-﻿"""Command-line interface for the logo_similarity project."""
+"""Command-line interface for the logo_similarity project."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 from typing import Iterable
+
+from .crawl.fetch import fetch_html
 
 
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
@@ -28,6 +30,11 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Directory path where downloaded logo assets will be stored.",
     )
+    parser.add_argument(
+        "--debug-fetch",
+        action="store_true",
+        help="Fetch the first few URLs and print HTML length for diagnostics.",
+    )
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
@@ -39,12 +46,22 @@ def read_input(path: Path) -> list[str]:
     return [line for line in lines if line]
 
 
+def _debug_fetch(urls: list[str]) -> None:
+    """Perform lightweight fetches for the first few *urls* and print stats."""
+    for url in urls[:3]:
+        final_url, html = fetch_html(url)
+        html_length = len(html) if html else 0
+        print(f"[debug] {url} -> {final_url or 'None'} ({html_length} chars)")
+
+
 def main(argv: Iterable[str] | None = None) -> int:
     """Entry point for the CLI."""
     args = parse_args(argv)
     input_path = Path(args.input)
     entries = read_input(input_path)
     print(len(entries))
+    if args.debug_fetch:
+        _debug_fetch(entries)
     return 0
 
 
