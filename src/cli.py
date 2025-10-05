@@ -4,10 +4,25 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
+from urllib.parse import urlparse
 
 from .crawl.discover_candidates import discover_logo_candidates
 from .crawl.fetch import fetch_html
+from .extract.select_logo import select_best
+
+DEFAULT_ASSET_DIR = Path("out") / "extracted"
+
+_MIME_EXTENSIONS = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/svg+xml": ".svg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/x-icon": ".ico",
+    "image/vnd.microsoft.icon": ".ico",
+}
 
 
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
@@ -40,6 +55,11 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         "--debug-candidates",
         action="store_true",
         help="Extract logo candidates for the first two URLs and print the top ones.",
+    )
+    parser.add_argument(
+        "--lazy-selection",
+        action="store_true",
+        help="Skip candidate image downloads and select by confidence only.",
     )
     return parser.parse_args(list(argv) if argv is not None else None)
 
@@ -85,6 +105,88 @@ def _debug_candidates(urls: list[str]) -> None:
             print(f"  {index}. {source} (conf={confidence:.2f}) -> {src}")
 
 
+def _process_sites(urls: list[str], assets_dir: Path, lazy: bool) -> None:
+    """Fetch pages, discover candidates, and persist the preferred logo."""
+    if not urls:
+        return
+    if not lazy:
+        assets_dir.mkdir(parents=True, exist_ok=True)
+    for url in urls:
+        final_url, html = fetch_html(url)
+        base_url = final_url or url
+        host_label = _safe_host_label(base_url)
+        if not html:
+            print(f"[warn] {host_label}: no HTML content fetched")
+            continue
+        candidates = discover_logo_candidates(html, base_url)
+        if not candidates:
+            print(f"[warn] {host_label}: no logo candidates found")
+            continue
+        best = select_best(candidates, base_url, lazy=lazy)
+        if not best:
+            print(f"[warn] {host_label}: selection failed")
+            continue
+        image_bytes = best.get("image_bytes")
+        if not isinstance(image_bytes, (bytes, bytearray)):
+            print(
+                f"[info] {host_label}: selection did not yield image bytes (lazy={lazy})"
+            )
+            continue
+        output_path = _determine_asset_path(assets_dir, host_label, best)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(bytes(image_bytes))
+        print(f"[saved] {host_label}: {output_path}")
+
+
+def _determine_asset_path(assets_dir: Path, host_label: str, candidate: dict[str, Any]) -> Path:
+    extension = _extension_from_info(candidate) or ".orig"
+    path = assets_dir / f"{host_label}{extension}"
+    counter = 2
+    while path.exists():
+        path = assets_dir / f"{host_label}_{counter}{extension}"
+        counter += 1
+    return path
+
+
+def _extension_from_info(candidate: dict[str, Any]) -> str | None:
+    info = candidate.get("image_info")
+    if isinstance(info, dict):
+        mime = info.get("mime")
+        if isinstance(mime, str):
+            ext = _MIME_EXTENSIONS.get(mime.lower())
+            if ext:
+                return ext
+    for key in ("resolved_src", "src"):
+        value = candidate.get(key)
+        if isinstance(value, str):
+            ext = _extension_from_url(value)
+            if ext:
+                return ext
+    return None
+
+
+def _extension_from_url(value: str) -> str | None:
+    parsed = urlparse(value)
+    path = parsed.path or ""
+    if not path:
+        return None
+    filename = path.rsplit("/", 1)[-1]
+    if not filename or "." not in filename:
+        return None
+    ext = filename.rsplit(".", 1)[-1].lower()
+    if not ext or len(ext) > 6:
+        return None
+    return f".{ext}"
+
+
+def _safe_host_label(url: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.netloc or parsed.path or "site"
+    sanitized = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in host)
+    sanitized = sanitized.strip("._-")
+    return sanitized or "site"
+
+
 def main(argv: Iterable[str] | None = None) -> int:
     """Entry point for the CLI."""
     args = parse_args(argv)
@@ -95,9 +197,12 @@ def main(argv: Iterable[str] | None = None) -> int:
         _debug_fetch(entries)
     if args.debug_candidates:
         _debug_candidates(entries)
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    assets_dir = Path(args.assets) if args.assets else DEFAULT_ASSET_DIR
+    _process_sites(entries, assets_dir, lazy=args.lazy_selection)
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
