@@ -7,11 +7,15 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
+from PIL import Image
+
 from .crawl.discover_candidates import discover_logo_candidates
 from .crawl.fetch import fetch_html
+from .extract.normalize import normalize_logo
 from .extract.select_logo import select_best
 
 DEFAULT_ASSET_DIR = Path("out") / "extracted"
+PREVIEW_BG_RGBA = (0xF5, 0xF5, 0xF5, 255)
 
 _MIME_EXTENSIONS = {
     "image/png": ".png",
@@ -132,18 +136,55 @@ def _process_sites(urls: list[str], assets_dir: Path, lazy: bool) -> None:
                 f"[info] {host_label}: selection did not yield image bytes (lazy={lazy})"
             )
             continue
+        raw_bytes = bytes(image_bytes)
         output_path = _determine_asset_path(assets_dir, host_label, best)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(bytes(image_bytes))
+        output_path.write_bytes(raw_bytes)
         print(f"[saved] {host_label}: {output_path}")
+        _write_normalized_assets(raw_bytes, best, host_label, assets_dir)
+
+
+def _write_normalized_assets(
+    image_bytes: bytes, candidate: dict[str, Any], host_label: str, assets_dir: Path
+) -> None:
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    mime_hint: str | None = None
+    info = candidate.get("image_info")
+    if isinstance(info, dict):
+        mime_value = info.get("mime")
+        if isinstance(mime_value, str):
+            mime_hint = mime_value
+    try:
+        normalized = normalize_logo(image_bytes, mime_hint)
+    except Exception as exc:
+        print(f"[warn] {host_label}: normalization failed ({exc})")
+        return
+    normalized_path = assets_dir / f"{host_label}.png"
+    normalized.save(normalized_path, format="PNG")
+    preview_background = Image.new("RGBA", normalized.size, PREVIEW_BG_RGBA)
+    preview = Image.alpha_composite(preview_background, normalized)
+    preview_path = assets_dir / f"{host_label}.preview.png"
+    preview_rgb = preview.convert("RGB")
+    preview_rgb.save(preview_path, format="PNG")
+    print(f"[normalized] {host_label}: {normalized_path} (preview {preview_path})")
+    normalized.close()
+    preview.close()
+    preview_background.close()
+    preview_rgb.close()
 
 
 def _determine_asset_path(assets_dir: Path, host_label: str, candidate: dict[str, Any]) -> Path:
-    extension = _extension_from_info(candidate) or ".orig"
-    path = assets_dir / f"{host_label}{extension}"
+    extension = _extension_from_info(candidate)
+    suffix = extension or ""
+    base_name = f"{host_label}.orig{suffix}"
+    path = assets_dir / base_name
     counter = 2
     while path.exists():
-        path = assets_dir / f"{host_label}_{counter}{extension}"
+        if suffix:
+            base_name = f"{host_label}.orig_{counter}{suffix}"
+        else:
+            base_name = f"{host_label}.orig_{counter}"
+        path = assets_dir / base_name
         counter += 1
     return path
 
